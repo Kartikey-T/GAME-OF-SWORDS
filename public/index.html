@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sword Fighting Arena</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: #000;
+            font-family: 'Arial', sans-serif;
+        }
+        
+        #gameContainer {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+            color: white;
+        }
+        
+        .player-info {
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 10px;
+            border: 2px solid #444;
+        }
+        
+        .health-bar {
+            width: 200px;
+            height: 20px;
+            background: #333;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+        
+        .health-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #ff4444, #ff8888);
+            transition: width 0.3s;
+        }
+        
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 10px;
+            font-size: 14px;
+        }
+        
+        #gameOver {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 30px;
+            border-radius: 15px;
+            text-align: center;
+            display: none;
+            z-index: 200;
+        }
+        
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 10px;
+        }
+        
+        button:hover {
+            background: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <div id="ui">
+            <div class="player-info">
+                <div>Player 1 (WASD + Space)</div>
+                <div class="health-bar">
+                    <div class="health-fill" id="health1" style="width: 100%"></div>
+                </div>
+            </div>
+            <div class="player-info">
+                <div>Player 2 (Arrow Keys + Enter)</div>
+                <div class="health-bar">
+                    <div class="health-fill" id="health2" style="width: 100%"></div>
+                </div>
+            </div>
+        </div>
+        
+        <div id="controls">
+            <strong>Controls:</strong><br>
+            Player 1: WASD to move, SPACE to attack<br>
+            Player 2: Arrow keys to move, ENTER to attack<br>
+            Mouse to look around
+        </div>
+        
+        <div id="gameOver">
+            <h2 id="winnerText">Player Wins!</h2>
+            <button onclick="restartGame()">Play Again</button>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Game variables
+        let scene, camera, renderer;
+        let players = [];
+        let swords = [];
+        let gameRunning = true;
+        
+        // Input handling
+        const keys = {};
+        let mouseX = 0, mouseY = 0;
+        
+        // Game settings
+        const ARENA_SIZE = 20;
+        const PLAYER_SPEED = 0.15;
+        const ATTACK_RANGE = 3;
+        const ATTACK_DAMAGE = 20;
+        const ATTACK_COOLDOWN = 1000; // ms
+        
+        // Initialize the game
+        function init() {
+            // Create scene
+            scene = new THREE.Scene();
+            scene.fog = new THREE.Fog(0x000000, 10, 50);
+            
+            // Create camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 15, 15);
+            camera.lookAt(0, 0, 0);
+            
+            // Create renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setClearColor(0x001122);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.getElementById('gameContainer').appendChild(renderer.domElement);
+            
+            // Create lighting
+            const ambientLight = new THREE.AmbientLight(0x404040, 0.3);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(10, 10, 5);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            scene.add(directionalLight);
+            
+            // Create arena
+            createArena();
+            
+            // Create players
+            createPlayers();
+            
+            // Set up event listeners
+            setupEventListeners();
+            
+            // Start game loop
+            animate();
+        }
+        
+        function createArena() {
+            // Arena floor
+            const floorGeometry = new THREE.PlaneGeometry(ARENA_SIZE, ARENA_SIZE);
+            const floorMaterial = new THREE.MeshLambertMaterial({ 
+                color: 0x2d4a2d,
+                transparent: true,
+                opacity: 0.8
+            });
+            const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+            
+            // Arena walls
+            const wallHeight = 3;
+            const wallGeometry = new THREE.BoxGeometry(0.5, wallHeight, ARENA_SIZE);
+            const wallMaterial = new THREE.MeshLambertMaterial({ color: 0x444444 });
+            
+            // Create 4 walls
+            const positions = [
+                { x: ARENA_SIZE/2, z: 0 },
+                { x: -ARENA_SIZE/2, z: 0 },
+                { x: 0, z: ARENA_SIZE/2 },
+                { x: 0, z: -ARENA_SIZE/2 }
+            ];
+            
+            const rotations = [0, 0, Math.PI/2, Math.PI/2];
+            
+            positions.forEach((pos, i) => {
+                const wall = new THREE.Mesh(wallGeometry, wallMaterial);
+                wall.position.set(pos.x, wallHeight/2, pos.z);
+                wall.rotation.y = rotations[i];
+                wall.castShadow = true;
+                scene.add(wall);
+            });
+        }
+        
+        function createPlayers() {
+            const colors = [0xff4444, 0x4444ff];
+            const positions = [
+                { x: -5, z: -5 },
+                { x: 5, z: 5 }
+            ];
+            
+            for (let i = 0; i < 2; i++) {
+                // Player body (using cylinder instead of capsule)
+                const bodyGeometry = new THREE.CylinderGeometry(0.5, 0.5, 2);
+                const bodyMaterial = new THREE.MeshLambertMaterial({ color: colors[i] });
+                const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+                body.position.set(positions[i].x, 1.5, positions[i].z);
+                body.castShadow = true;
+                scene.add(body);
+                
+                // Player head
+                const headGeometry = new THREE.SphereGeometry(0.4);
+                const headMaterial = new THREE.MeshLambertMaterial({ color: colors[i] });
+                const head = new THREE.Mesh(headGeometry, headMaterial);
+                head.position.set(0, 1.2, 0);
+                head.castShadow = true;
+                body.add(head);
+                
+                // Sword
+                const swordGroup = new THREE.Group();
+                
+                // Sword blade
+                const bladeGeometry = new THREE.BoxGeometry(0.1, 2, 0.05);
+                const bladeMaterial = new THREE.MeshLambertMaterial({ color: 0xcccccc });
+                const blade = new THREE.Mesh(bladeGeometry, bladeMaterial);
+                blade.position.set(0, 1, 0);
+                blade.castShadow = true;
+                swordGroup.add(blade);
+                
+                // Sword handle
+                const handleGeometry = new THREE.BoxGeometry(0.15, 0.6, 0.15);
+                const handleMaterial = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
+                const handle = new THREE.Mesh(handleGeometry, handleMaterial);
+                handle.position.set(0, -0.3, 0);
+                handle.castShadow = true;
+                swordGroup.add(handle);
+                
+                swordGroup.position.set(0.8, 0, 0);
+                body.add(swordGroup);
+                
+                // Player object
+                players.push({
+                    body: body,
+                    sword: swordGroup,
+                    health: 100,
+                    maxHealth: 100,
+                    lastAttack: 0,
+                    attacking: false,
+                    velocity: new THREE.Vector3()
+                });
+                
+                swords.push(swordGroup);
+            }
+        }
+        
+        function setupEventListeners() {
+            // Keyboard events
+            document.addEventListener('keydown', (e) => {
+                keys[e.code] = true;
+            });
+            
+            document.addEventListener('keyup', (e) => {
+                keys[e.code] = false;
+            });
+            
+            // Mouse events
+            document.addEventListener('mousemove', (e) => {
+                mouseX = (e.clientX / window.innerWidth) * 2 - 1;
+                mouseY = -(e.clientY / window.innerHeight) * 2 + 1;
+            });
+            
+            // Window resize
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+        
+        function updatePlayer(playerIndex) {
+            if (!gameRunning) return;
+            
+            const player = players[playerIndex];
+            const body = player.body;
+            const currentTime = Date.now();
+            
+            // Reset velocity
+            player.velocity.set(0, 0, 0);
+            
+            // Player 1 controls (WASD + Space)
+            if (playerIndex === 0) {
+                if (keys['KeyW']) player.velocity.z -= PLAYER_SPEED;
+                if (keys['KeyS']) player.velocity.z += PLAYER_SPEED;
+                if (keys['KeyA']) player.velocity.x -= PLAYER_SPEED;
+                if (keys['KeyD']) player.velocity.x += PLAYER_SPEED;
+                if (keys['Space'] && currentTime - player.lastAttack > ATTACK_COOLDOWN) {
+                    attack(playerIndex);
+                }
+            }
+            // Player 2 controls (Arrow keys + Enter)
+            else if (playerIndex === 1) {
+                if (keys['ArrowUp']) player.velocity.z -= PLAYER_SPEED;
+                if (keys['ArrowDown']) player.velocity.z += PLAYER_SPEED;
+                if (keys['ArrowLeft']) player.velocity.x -= PLAYER_SPEED;
+                if (keys['ArrowRight']) player.velocity.x += PLAYER_SPEED;
+                if (keys['Enter'] && currentTime - player.lastAttack > ATTACK_COOLDOWN) {
+                    attack(playerIndex);
+                }
+            }
+            
+            // Apply movement
+            body.position.add(player.velocity);
+            
+            // Keep players in arena bounds
+            const halfSize = ARENA_SIZE / 2 - 1;
+            body.position.x = Math.max(-halfSize, Math.min(halfSize, body.position.x));
+            body.position.z = Math.max(-halfSize, Math.min(halfSize, body.position.z));
+            
+            // Face movement direction
+            if (player.velocity.length() > 0) {
+                const angle = Math.atan2(player.velocity.x, player.velocity.z);
+                body.rotation.y = angle;
+            }
+            
+            // Update attack animation
+            if (player.attacking) {
+                const attackProgress = (currentTime - player.lastAttack) / 500;
+                if (attackProgress < 1) {
+                    player.sword.rotation.z = Math.sin(attackProgress * Math.PI) * -0.8;
+                } else {
+                    player.attacking = false;
+                    player.sword.rotation.z = 0;
+                }
+            }
+        }
+        
+        function attack(attackerIndex) {
+            const attacker = players[attackerIndex];
+            const defender = players[1 - attackerIndex];
+            
+            attacker.lastAttack = Date.now();
+            attacker.attacking = true;
+            
+            // Calculate distance between players
+            const distance = attacker.body.position.distanceTo(defender.body.position);
+            
+            if (distance <= ATTACK_RANGE) {
+                // Hit!
+                defender.health -= ATTACK_DAMAGE;
+                defender.health = Math.max(0, defender.health);
+                
+                // Visual feedback - flash the defender
+                const originalColor = defender.body.material.color.getHex();
+                defender.body.material.color.setHex(0xffffff);
+                setTimeout(() => {
+                    defender.body.material.color.setHex(originalColor);
+                }, 100);
+                
+                // Update health bar
+                updateHealthBar(1 - attackerIndex);
+                
+                // Check for game over
+                if (defender.health <= 0) {
+                    endGame(attackerIndex);
+                }
+            }
+        }
+        
+        function updateHealthBar(playerIndex) {
+            const player = players[playerIndex];
+            const healthPercent = (player.health / player.maxHealth) * 100;
+            const healthBar = document.getElementById(`health${playerIndex + 1}`);
+            healthBar.style.width = healthPercent + '%';
+            
+            // Change color based on health
+            if (healthPercent > 60) {
+                healthBar.style.background = 'linear-gradient(90deg, #44ff44, #88ff88)';
+            } else if (healthPercent > 30) {
+                healthBar.style.background = 'linear-gradient(90deg, #ffff44, #ffff88)';
+            } else {
+                healthBar.style.background = 'linear-gradient(90deg, #ff4444, #ff8888)';
+            }
+        }
+        
+        function endGame(winnerIndex) {
+            gameRunning = false;
+            document.getElementById('winnerText').textContent = `Player ${winnerIndex + 1} Wins!`;
+            document.getElementById('gameOver').style.display = 'block';
+        }
+        
+        function restartGame() {
+            gameRunning = true;
+            document.getElementById('gameOver').style.display = 'none';
+            
+            // Reset players
+            players.forEach((player, index) => {
+                player.health = player.maxHealth;
+                player.attacking = false;
+                player.lastAttack = 0;
+                player.sword.rotation.z = 0;
+                
+                // Reset positions
+                const positions = [
+                    { x: -5, z: -5 },
+                    { x: 5, z: 5 }
+                ];
+                player.body.position.set(positions[index].x, 1.5, positions[index].z);
+                
+                // Reset health bars
+                updateHealthBar(index);
+            });
+        }
+        
+        function updateCamera() {
+            // Simple camera follow - stays elevated and looks down at the arena
+            const player1Pos = players[0].body.position;
+            const player2Pos = players[1].body.position;
+            
+            // Average position between players
+            const centerX = (player1Pos.x + player2Pos.x) / 2;
+            const centerZ = (player1Pos.z + player2Pos.z) / 2;
+            
+            camera.position.x += (centerX - camera.position.x) * 0.05;
+            camera.position.z += (centerZ + 10 - camera.position.z) * 0.05;
+            camera.lookAt(centerX, 0, centerZ);
+        }
+        
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Update players
+            for (let i = 0; i < players.length; i++) {
+                updatePlayer(i);
+            }
+            
+            // Update camera
+            updateCamera();
+            
+            // Render
+            renderer.render(scene, camera);
+        }
+        
+        // Start the game
+        init();
+    </script>
+</body>
+</html>

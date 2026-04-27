@@ -107,7 +107,7 @@ function MapScreen({ territories, onGoToMenu, onAttack }) {
           className="secondary-button"
           style={{ marginBottom: '14px' }}
           onClick={() => {
-            window.location.href = '/index.html'
+            window.location.href = '/idex.html'
           }}
         >
           Enter Duel Arena ⚔️
